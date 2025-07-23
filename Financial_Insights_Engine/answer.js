@@ -182,14 +182,19 @@ async function analyzeAndRespond(userQuestion) {
           question: userQuestion
         }));
 
-      case 'net_worth':
-        if (!data.netWorth) {
-          return "I couldn't retrieve your net worth information to answer your question. Please try again later.";
-        }
-        return await rateLimitedRequest(() => getAssets({
-          netWorth: data.netWorth,
-          question: userQuestion
-        }));
+        case 'net_worth':
+          // console.log("HELLO")
+          if (!data.netWorth || !data.mfTransactions || !data.stockTransactions) {
+            // console.log("HELLO");
+            return "I couldn't retrieve your necessary information to answer your question.";
+          }
+          return await getAssets({
+            
+            question: userQuestion,
+            netWorth: data.netWorth,
+            mfTransactions:data.mfTransactions,
+            stockTransactions:data.stockTransactions,
+          });
 
       default:
         // For general questions, use fallback responses or simple AI
@@ -502,25 +507,46 @@ async function getCreditAnalysis({ creditReport, question }) {
 /**
  * Analyzes net worth and assets.
  */
-async function getAssets({ netWorth, question }) {
+async function getAssets({ question, netWorth, mfTransactions, stockTransactions }) {
   const prompt = `
-  Analyze this net worth information to answer the user's question.
-  Question: "${question}"
-
-  Net Worth Data: ${netWorth}
-
-  Provide:
-  1. Clear answer based on the data
-  2. Asset allocation analysis
-  3. Recommendations for improvement
-  4. Risk assessment
-  5. Next steps
-
-  Keep the response practical and specific.
-  `;
-
-  const result = await model.generateContent(prompt);
-  return result.response.text();
-}
+ You are a smart and analytical financial assistant helping users understand their personal net worth, investments, and asset portfolio. 
+ 
+ You will be provided with structured financial data including:
+ - 📊 Net Worth breakdown
+ - 📈 Mutual Fund transactions
+ - 📉 Stock transactions
+ 
+ Your task is to:
+ 1. Accurately interpret the data.
+ 2. Answer the user's question clearly and concisely.
+ 3. Provide helpful insights or summaries where applicable (like asset allocation, trends, growth, etc.).
+ 
+ You must base your response **only** on the data provided. If something is not available or unclear, say so politely and do not guess.
+ 
+ ---
+ 🔸 Net Worth Degtails:
+ ${netWorth}
+ 
+ 🔸 Mutual Fund Transactions:
+ ${mfTransactions}
+ 
+ 🔸 Stock Transactions:
+ ${stockTransactions}
+ 
+ ---
+ 
+ Now answer the following user query using only the information provided above:
+ "${question}"
+ 
+ Be concise, accurate, and focus only on the relevant data. You can perform calculations or summaries based on the given data.
+ `;
+   // console.log(prompt);
+   const result = await model.generateContent(prompt);
+   const response = result.response;
+   // console.log(response.text());
+   return response.text();
+ }
 
 export { analyzeAndRespond as answer };
+
+console.log(analyzeAndRespond("how much i spend on zomato?"));
