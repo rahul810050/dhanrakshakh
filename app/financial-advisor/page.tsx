@@ -23,7 +23,6 @@ import {
   Bot,
   User
 } from 'lucide-react';
-import {answer} from '../../Financial_Insights_Engine/answer'
 
 interface AIRecommendation {
   id: string;
@@ -145,23 +144,25 @@ export default function FinancialAdvisorPage() {
   };
 
   const generateAIResponse = async (userMessage: string): string => {
-    const message = userMessage.toLowerCase();
+    try {
+      const response = await fetch('/api/financial-advisor', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ question: userMessage }),
+      });
 
-    const ansAI = await answer(userMessage)
-    console.log(ansAI);
-    return ansAI;
-    
-    // if (message.includes('investment') || message.includes('invest')) {
-    //   return 'Based on your profile, I recommend a balanced portfolio with 60% equity and 40% debt. Consider starting with large-cap mutual funds for stability and gradually adding mid-cap funds for growth.';
-    // } else if (message.includes('save') || message.includes('saving')) {
-    //   return 'Great question! I suggest following the 50-30-20 rule: 50% for needs, 30% for wants, and 20% for savings. You can optimize by reducing discretionary spending and automating your savings.';
-    // } else if (message.includes('tax')) {
-    //   return 'Tax planning is crucial! You can save taxes through ELSS funds (Section 80C), health insurance premiums (Section 80D), and home loan interest (Section 24B). Would you like specific recommendations?';
-    // } else if (message.includes('retirement')) {
-    //   return 'For retirement planning, start early with a mix of equity and PPF. Aim to save 15-20% of your income for retirement. Consider increasing your SIP amount by 10% annually.';
-    // } else {
-    //   return 'I understand your concern. Based on your financial profile, I recommend focusing on building an emergency fund first, then increasing your SIP investments. Would you like me to create a detailed financial plan for you?';
-    // }
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+      return data.response || 'Sorry, I could not process your request at the moment.';
+    } catch (error) {
+      console.error('Error calling financial advisor API:', error);
+      return 'Sorry, I encountered an error while processing your request. Please try again later.';
+    }
   };
 
   const getPriorityColor = (priority: string) => {

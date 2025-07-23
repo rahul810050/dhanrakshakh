@@ -353,5 +353,6 @@ async function getCreditAnalysis({ creditReport, question }) {
 
 export { analyzeAndRespond as answer };
 
-console.log(analyzeAndRespond("Can you give me the this month transactions visualized ?"));
+// Removed console.log to prevent it from running during import
+// console.log(analyzeAndRespond("Can you give me the this month transactions visualized ?"));
 
