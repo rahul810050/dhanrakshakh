@@ -23,6 +23,7 @@ import {
   Bot,
   User
 } from 'lucide-react';
+import {answer} from '../../Financial_Insights_Engine/answer'
 
 interface AIRecommendation {
   id: string;
@@ -143,20 +144,24 @@ export default function FinancialAdvisorPage() {
     }, 2000);
   };
 
-  const generateAIResponse = (userMessage: string): string => {
+  const generateAIResponse = async (userMessage: string): string => {
     const message = userMessage.toLowerCase();
+
+    const ansAI = await answer(userMessage)
+    console.log(ansAI);
+    return ansAI;
     
-    if (message.includes('investment') || message.includes('invest')) {
-      return 'Based on your profile, I recommend a balanced portfolio with 60% equity and 40% debt. Consider starting with large-cap mutual funds for stability and gradually adding mid-cap funds for growth.';
-    } else if (message.includes('save') || message.includes('saving')) {
-      return 'Great question! I suggest following the 50-30-20 rule: 50% for needs, 30% for wants, and 20% for savings. You can optimize by reducing discretionary spending and automating your savings.';
-    } else if (message.includes('tax')) {
-      return 'Tax planning is crucial! You can save taxes through ELSS funds (Section 80C), health insurance premiums (Section 80D), and home loan interest (Section 24B). Would you like specific recommendations?';
-    } else if (message.includes('retirement')) {
-      return 'For retirement planning, start early with a mix of equity and PPF. Aim to save 15-20% of your income for retirement. Consider increasing your SIP amount by 10% annually.';
-    } else {
-      return 'I understand your concern. Based on your financial profile, I recommend focusing on building an emergency fund first, then increasing your SIP investments. Would you like me to create a detailed financial plan for you?';
-    }
+    // if (message.includes('investment') || message.includes('invest')) {
+    //   return 'Based on your profile, I recommend a balanced portfolio with 60% equity and 40% debt. Consider starting with large-cap mutual funds for stability and gradually adding mid-cap funds for growth.';
+    // } else if (message.includes('save') || message.includes('saving')) {
+    //   return 'Great question! I suggest following the 50-30-20 rule: 50% for needs, 30% for wants, and 20% for savings. You can optimize by reducing discretionary spending and automating your savings.';
+    // } else if (message.includes('tax')) {
+    //   return 'Tax planning is crucial! You can save taxes through ELSS funds (Section 80C), health insurance premiums (Section 80D), and home loan interest (Section 24B). Would you like specific recommendations?';
+    // } else if (message.includes('retirement')) {
+    //   return 'For retirement planning, start early with a mix of equity and PPF. Aim to save 15-20% of your income for retirement. Consider increasing your SIP amount by 10% annually.';
+    // } else {
+    //   return 'I understand your concern. Based on your financial profile, I recommend focusing on building an emergency fund first, then increasing your SIP investments. Would you like me to create a detailed financial plan for you?';
+    // }
   };
 
   const getPriorityColor = (priority: string) => {
