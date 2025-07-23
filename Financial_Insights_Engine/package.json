@@ -4,6 +4,9 @@
   "version": "1.0.0",
   "description": "A minimal, hackathon-ready version of the Fi MCP server. This project provides a lightweight mock server for use in hackathons, demos, and development, simulating the core features of the production Fi MCP server with dummy data and simplified authentication.",
   "main": "fiMcpClient.js",
+  "exports": {
+    "./answer": "./answer.js"
+  },
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
   },
