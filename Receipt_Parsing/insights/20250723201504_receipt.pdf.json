@@ -1,0 +1,37 @@
+{
+  "vendor": "DMart ready",
+  "date": "23/02/2020",
+  "total_amount": 1219.0,
+  "items": [
+    {
+      "name": "Blanket Polar Blue",
+      "quantity": 1,
+      "price": 199.0,
+      "category": "household"
+    },
+    {
+      "name": "Henko Stain Champoxg Powder 5kg+1.5kg Fr",
+      "quantity": 1,
+      "price": 624.0,
+      "category": "household"
+    },
+    {
+      "name": "Colgate Visible White TP 2X100gm",
+      "quantity": 1,
+      "price": 161.0,
+      "category": "personal care"
+    },
+    {
+      "name": "Jo Lime Soap B3G1F-4X150g",
+      "quantity": 1,
+      "price": 70.0,
+      "category": "personal care"
+    },
+    {
+      "name": "Surf Excel Quick Wash-1kg",
+      "quantity": 1,
+      "price": 165.0,
+      "category": "household"
+    }
+  ]
+}
