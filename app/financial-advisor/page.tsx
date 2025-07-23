@@ -118,6 +118,15 @@ export default function FinancialAdvisorPage() {
   const handleSendMessage = async () => {
     if (!newMessage.trim()) return;
 
+    // Validate message length
+    if (newMessage.length > 500) {
+      toast({
+        title: 'Message too long',
+        description: 'Please keep your question under 500 characters.',
+        variant: 'destructive',
+      });
+      return;
+    }
     const userMessage: ChatMessage = {
       id: Date.now().toString(),
       type: 'user',
@@ -129,18 +138,30 @@ export default function FinancialAdvisorPage() {
     setNewMessage('');
     setIsTyping(true);
 
-    // Simulate AI response
-    setTimeout(() => {
+    try {
+      // Get AI response
+      const responseContent = await generateAIResponse(newMessage);
+      
       const aiResponse: ChatMessage = {
         id: (Date.now() + 1).toString(),
         type: 'ai',
-        content: generateAIResponse(newMessage),
+        content: responseContent,
         timestamp: new Date(),
       };
 
       setChatMessages(prev => [...prev, aiResponse]);
+    } catch (error) {
+      console.error('Error getting AI response:', error);
+      const errorResponse: ChatMessage = {
+        id: (Date.now() + 1).toString(),
+        type: 'ai',
+        content: 'I apologize, but I\'m currently experiencing technical difficulties. Please try again in a few minutes.',
+        timestamp: new Date(),
+      };
+      setChatMessages(prev => [...prev, errorResponse]);
+    } finally {
       setIsTyping(false);
-    }, 2000);
+    }
   };
 
   const generateAIResponse = async (userMessage: string): string => {
@@ -158,10 +179,54 @@ export default function FinancialAdvisorPage() {
       }
 
       const data = await response.json();
-      return data.response || 'Sorry, I could not process your request at the moment.';
+      
+      // Handle both success and fallback responses
+      if (data.response) {
+        return data.response;
+      }
+      
+      return 'Sorry, I could not process your request at the moment. Please try again later.';
     } catch (error) {
       console.error('Error calling financial advisor API:', error);
-      return 'Sorry, I encountered an error while processing your request. Please try again later.';
+      
+      // Provide helpful fallback based on the question
+      const lowerMessage = userMessage.toLowerCase();
+      
+      if (lowerMessage.includes('investment')) {
+        return `I'm currently experiencing high demand. Here's quick investment advice:
+
+For beginners:
+• Start SIP in diversified mutual funds (₹1000-5000/month)
+• Build emergency fund (6 months expenses)
+• Consider ELSS for tax saving
+• Stay invested long-term for best results
+
+Please try your question again in a few minutes for detailed advice!`;
+      }
+      
+      if (lowerMessage.includes('tax')) {
+        return `I'm currently busy, but here's quick tax-saving info:
+
+Section 80C options (₹1.5L limit):
+• ELSS mutual funds (best returns)
+• PPF (safe, long-term)
+• EPF contributions
+
+Additional: Health insurance (80D), NPS (80CCD1B)
+
+Try asking again in a few minutes for personalized advice!`;
+      }
+      
+      return `I'm experiencing high demand right now. Please try again in a few minutes.
+
+I can help with:
+• Investment strategies
+• Tax planning  
+• Retirement planning
+• Expense management
+• SIP calculations
+
+Try asking a specific question about any of these topics!`;
     }
   };
 
@@ -347,8 +412,9 @@ export default function FinancialAdvisorPage() {
                     value={newMessage}
                     onChange={(e) => setNewMessage(e.target.value)}
                     onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
-                    placeholder="Ask me about your finances..."
+                    placeholder="Ask me about investments, taxes, retirement... (max 500 chars)"
                     className="bg-white border-[#2f8c8c] text-[#2b2731]"
+                    maxLength={500}
                   />
                   <Button 
                     onClick={handleSendMessage}
@@ -357,6 +423,9 @@ export default function FinancialAdvisorPage() {
                   >
                     <Send className="w-4 h-4" />
                   </Button>
+                </div>
+                <div className="text-xs text-[#2b2731] opacity-60 mt-1">
+                  {newMessage.length}/500 characters
                 </div>
               </CardContent>
             </Card>

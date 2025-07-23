@@ -1,20 +1,3 @@
-// import { GoogleGenerativeAI } from "@google/generative-ai";
-// import dotenv from 'dotenv'; 
-// dotenv.config(); 
-// import {
-//   getFinancialData,
-//   getBankTransactions,
-//   getCreditReport,
-//   getEPFDetails,
-//   getMFTransactions,
-//   getStockTransactions,
-//   getNetWorth
-// } from "./testClient.js"; // assuming you're importing these from a module
-
-// // Initialize Gemini
-// const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-// const model = genAI.getGenerativeModel({ model: "gemini-pro" });
-
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import dotenv from 'dotenv';
 dotenv.config();
@@ -26,121 +9,347 @@ import {
   getMFTransactions,
   getStockTransactions,
   getNetWorth
-} from "./testClient.js"; // assuming you're importing these from a module
+} from "./testClient.js";
 
-// Initialize Gemini with gemini-1.5-flash model
+// Initialize Gemini with gemini-1.5-flash model (has higher rate limits)
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-const model = genAI.getGenerativeModel({ model: "gemini-1.5-pro" });
+const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+
+// Rate limiting variables
+let lastRequestTime = 0;
+const MIN_REQUEST_INTERVAL = 2000; // 2 seconds between requests
+let requestCount = 0;
+const MAX_REQUESTS_PER_MINUTE = 15;
+const requestTimes = [];
+
+// Helper function to wait between requests
+async function rateLimitedRequest(requestFn) {
+  const now = Date.now();
+  
+  // Clean old request times (older than 1 minute)
+  while (requestTimes.length > 0 && now - requestTimes[0] > 60000) {
+    requestTimes.shift();
+  }
+  
+  // Check if we've exceeded rate limit
+  if (requestTimes.length >= MAX_REQUESTS_PER_MINUTE) {
+    const waitTime = 60000 - (now - requestTimes[0]) + 1000; // Wait until oldest request is > 1 minute old
+    console.log(`Rate limit reached. Waiting ${waitTime}ms...`);
+    await new Promise(resolve => setTimeout(resolve, waitTime));
+  }
+  
+  // Ensure minimum interval between requests
+  const timeSinceLastRequest = now - lastRequestTime;
+  if (timeSinceLastRequest < MIN_REQUEST_INTERVAL) {
+    const waitTime = MIN_REQUEST_INTERVAL - timeSinceLastRequest;
+    await new Promise(resolve => setTimeout(resolve, waitTime));
+  }
+  
+  try {
+    requestTimes.push(Date.now());
+    lastRequestTime = Date.now();
+    return await requestFn();
+  } catch (error) {
+    if (error.status === 429) {
+      // Extract retry delay from error if available
+      const retryDelay = error.errorDetails?.find(detail => 
+        detail['@type'] === 'type.googleapis.com/google.rpc.RetryInfo'
+      )?.retryDelay;
+      
+      let waitTime = 30000; // Default 30 seconds
+      if (retryDelay) {
+        const seconds = parseInt(retryDelay.replace('s', ''));
+        waitTime = (seconds + 5) * 1000; // Add 5 seconds buffer
+      }
+      
+      console.log(`Rate limited. Waiting ${waitTime}ms before retry...`);
+      await new Promise(resolve => setTimeout(resolve, waitTime));
+      
+      // Retry once
+      requestTimes.push(Date.now());
+      lastRequestTime = Date.now();
+      return await requestFn();
+    }
+    throw error;
+  }
+}
 
 // Main function to handle the user's financial question
 async function analyzeAndRespond(userQuestion) {
   try {
-    const analysis = await analyzeQuestion(userQuestion);
+    // First try to analyze the question
+    let analysis;
+    try {
+      analysis = await rateLimitedRequest(() => analyzeQuestion(userQuestion));
+    } catch (error) {
+      console.error("Error analyzing question:", error);
+      // Fallback to simple keyword-based analysis
+      analysis = fallbackAnalyzeQuestion(userQuestion);
+    }
+    
     const data = {};
 
     // Conditionally fetch data based on the analysis
     if (analysis.needsBankData) {
-      data.bankTransactions = await getBankTransactions();
-      // console.log("HELLO")
-      // console.log(data)
+      try {
+        data.bankTransactions = await getBankTransactions();
+      } catch (error) {
+        console.error("Error fetching bank data:", error);
+      }
     }
 
     if (analysis.needsCreditData) {
-      data.creditReport = await getCreditReport();
+      try {
+        data.creditReport = await getCreditReport();
+      } catch (error) {
+        console.error("Error fetching credit data:", error);
+      }
     }
 
     if (analysis.needsEPFData) {
-      data.epfDetails = await getEPFDetails();
+      try {
+        data.epfDetails = await getEPFDetails();
+      } catch (error) {
+        console.error("Error fetching EPF data:", error);
+      }
     }
 
     if (analysis.needsMFData) {
-      data.mfTransactions = await getMFTransactions();
+      try {
+        data.mfTransactions = await getMFTransactions();
+      } catch (error) {
+        console.error("Error fetching MF data:", error);
+      }
     }
 
     if (analysis.needsStockData) {
-      data.stockTransactions = await getStockTransactions();
+      try {
+        data.stockTransactions = await getStockTransactions();
+      } catch (error) {
+        console.error("Error fetching stock data:", error);
+      }
     }
 
     if (analysis.needsNetWorth) {
-      data.netWorth = await getNetWorth();
+      try {
+        data.netWorth = await getNetWorth();
+      } catch (error) {
+        console.error("Error fetching net worth data:", error);
+      }
     }
 
     // Route the request based on the detected intent
     switch (analysis.intent) {
       case 'expense':
         if (!data.bankTransactions) {
-          return "I couldn't retrieve the necessary bank data to answer your expense question.";
+          return "I couldn't retrieve the necessary bank data to answer your expense question. Please try again later.";
         }
-        return await getExpense({
+        return await rateLimitedRequest(() => getExpense({
           transactions: data.bankTransactions,
           question: userQuestion,
           timePeriod: analysis.timePeriod,
           merchant: analysis.merchant,
           category: analysis.category
-        });
+        }));
 
       case 'investment':
-        return await getInvestmentAdvice({
+        return await rateLimitedRequest(() => getInvestmentAdvice({
           question: userQuestion,
           netWorth: data.netWorth,
           creditScore: data.creditReport?.score,
           epfData: data.epfDetails,
           mfTransactions: data.mfTransactions,
           stockTransactions: data.stockTransactions
-        });
+        }));
 
       case 'chart':
         if (!data.bankTransactions) {
-          return "I couldn't retrieve the necessary transaction data to generate a chart.";
+          return "I couldn't retrieve the necessary transaction data to generate a chart. Please try again later.";
         }
-        return await getChart({
+        return await rateLimitedRequest(() => getChart({
           transactions: data.bankTransactions,
           question: userQuestion,
           timePeriod: analysis.timePeriod,
           category: analysis.category
-        });
+        }));
 
       case 'credit':
         if (!data.creditReport) {
-          return "I couldn't retrieve your credit report to answer your question.";
+          return "I couldn't retrieve your credit report to answer your question. Please try again later.";
         }
-        return await getCreditAnalysis({
+        return await rateLimitedRequest(() => getCreditAnalysis({
           creditReport: data.creditReport,
           question: userQuestion
-        });
+        }));
 
       case 'net_worth':
-        if (!data.creditReport) {
-          return "I couldn't retrieve your necessary information to answer your question.";
+        if (!data.netWorth) {
+          return "I couldn't retrieve your net worth information to answer your question. Please try again later.";
         }
-        return await getAssets({
-          netWortht: data.netWorth,
+        return await rateLimitedRequest(() => getAssets({
+          netWorth: data.netWorth,
           question: userQuestion
-        });
-
+        }));
 
       default:
-        // For general questions, directly use the model
-
-        const result = await model.generateContent(userQuestion);
-        console.log(result.response.text())
-        return result.response.text();
+        // For general questions, use fallback responses or simple AI
+        return await handleGeneralQuestion(userQuestion);
     }
   } catch (error) {
     console.error("Error processing question:", error);
-    return "Sorry, I encountered an error processing your request. Please try again later.";
+    return "I'm experiencing high demand right now. Please try asking your question again in a few moments, or try rephrasing it more simply.";
+  }
+}
+
+// Fallback question analysis using keywords
+function fallbackAnalyzeQuestion(question) {
+  const lowerQuestion = question.toLowerCase();
+  
+  let intent = 'general';
+  let needsBankData = false;
+  let needsCreditData = false;
+  let needsEPFData = false;
+  let needsMFData = false;
+  let needsStockData = false;
+  let needsNetWorth = false;
+  
+  // Expense keywords
+  if (lowerQuestion.includes('spend') || lowerQuestion.includes('expense') || 
+      lowerQuestion.includes('transaction') || lowerQuestion.includes('payment')) {
+    intent = 'expense';
+    needsBankData = true;
+  }
+  
+  // Investment keywords
+  else if (lowerQuestion.includes('invest') || lowerQuestion.includes('portfolio') || 
+           lowerQuestion.includes('mutual fund') || lowerQuestion.includes('stock')) {
+    intent = 'investment';
+    needsNetWorth = true;
+    needsMFData = true;
+    needsStockData = true;
+  }
+  
+  // Credit keywords
+  else if (lowerQuestion.includes('credit') || lowerQuestion.includes('score') || 
+           lowerQuestion.includes('loan')) {
+    intent = 'credit';
+    needsCreditData = true;
+  }
+  
+  // Net worth keywords
+  else if (lowerQuestion.includes('net worth') || lowerQuestion.includes('assets') || 
+           lowerQuestion.includes('wealth')) {
+    intent = 'net_worth';
+    needsNetWorth = true;
+  }
+  
+  // Chart keywords
+  else if (lowerQuestion.includes('chart') || lowerQuestion.includes('graph') || 
+           lowerQuestion.includes('visualize')) {
+    intent = 'chart';
+    needsBankData = true;
+  }
+  
+  return {
+    intent,
+    needsBankData,
+    needsCreditData,
+    needsEPFData,
+    needsMFData,
+    needsStockData,
+    needsNetWorth
+  };
+}
+
+// Handle general questions with fallback responses
+async function handleGeneralQuestion(question) {
+  const lowerQuestion = question.toLowerCase();
+  
+  // Common financial questions with predefined answers
+  if (lowerQuestion.includes('investment') && lowerQuestion.includes('beginner')) {
+    return `For beginners, I recommend starting with:
+
+1. **Emergency Fund**: Build 6 months of expenses in a savings account
+2. **SIP in Mutual Funds**: Start with diversified equity funds (₹1000-5000/month)
+3. **PPF**: Tax-saving investment with 15-year lock-in
+4. **ELSS Funds**: Tax-saving mutual funds under Section 80C
+
+Key principles:
+- Start early to benefit from compounding
+- Diversify across asset classes
+- Invest regularly through SIPs
+- Review and rebalance annually
+
+Would you like specific fund recommendations or help calculating SIP amounts?`;
+  }
+  
+  if (lowerQuestion.includes('tax') && lowerQuestion.includes('save')) {
+    return `Here are the main tax-saving options under Section 80C:
+
+1. **ELSS Mutual Funds** (₹1.5L limit)
+   - 3-year lock-in, potential for high returns
+   
+2. **PPF** (₹1.5L limit)
+   - 15-year lock-in, tax-free returns
+   
+3. **EPF** - Employer contribution
+4. **NSC** - 5-year fixed deposits
+5. **Tax-saving FDs** - 5-year lock-in
+
+Additional deductions:
+- Section 80D: Health insurance (₹25K-50K)
+- Section 80CCD(1B): NPS (₹50K additional)
+
+Would you like help calculating your potential tax savings?`;
+  }
+  
+  if (lowerQuestion.includes('retirement') || lowerQuestion.includes('pension')) {
+    return `Retirement planning essentials:
+
+1. **Start Early**: Time is your biggest advantage
+2. **Calculate Corpus**: Aim for 25-30x annual expenses
+3. **Investment Mix**:
+   - Equity (60-70% when young)
+   - Debt (30-40%)
+   - Gradually shift to debt as you age
+
+4. **Retirement Accounts**:
+   - EPF/PPF for tax benefits
+   - NPS for additional tax savings
+   - Mutual funds for growth
+
+5. **Rule of Thumb**: Save at least 20% of income for retirement
+
+Would you like help calculating your retirement corpus or creating a personalized plan?`;
+  }
+  
+  // Try to use AI for other questions with error handling
+  try {
+    return await rateLimitedRequest(async () => {
+      const result = await model.generateContent(question);
+      return result.response.text();
+    });
+  } catch (error) {
+    console.error("Error with AI response:", error);
+    return `I'm currently experiencing high demand and cannot process complex questions. Here are some things I can help you with:
+
+• Investment advice for beginners
+• Tax-saving strategies
+• Retirement planning basics
+• SIP calculations
+• Expense tracking tips
+
+Please try asking a more specific question about any of these topics, or try again in a few minutes.`;
   }
 }
 
 /**
  * Analyzes the user's question to determine intent and required data.
- * @param {string} question - The user's financial question.
- * @returns {object} - An object containing intent, time period, merchant, category, and data needs.
  */
 async function analyzeQuestion(question) {
   const prompt = `
   Analyze this financial question and return a JSON response with:
-  - intent: 'expense', 'investment', 'credit', 'chart','net_worth'
+  - intent: 'expense', 'investment', 'credit', 'chart','net_worth', 'general'
   - timePeriod if mentioned (e.g., 'last week', 'this month')
   - merchant if mentioned (e.g., 'Amazon')
   - category if mentioned (e.g., 'food', 'shopping')
@@ -148,7 +357,7 @@ async function analyzeQuestion(question) {
 
   Question: "${question}"
 
-  Example response for "how much I spend on Amazon last month":
+  Return ONLY a JSON object, no markdown formatting:
   {
     "intent": "expense",
     "timePeriod": "last month",
@@ -160,199 +369,158 @@ async function analyzeQuestion(question) {
     "needsStockData": false,
     "needsNetWorth": false
   }
-
-  Return ONLY the JSON object, no other text. Ensure the response is a raw JSON string, without any markdown formatting or extra characters outside the JSON itself.
   `;
 
   try {
     const result = await model.generateContent(prompt);
-    let responseText = result.response.text(); // Get the raw text response from the model
-    console.log("HI"+responseText);
-    // Regex to extract JSON from a markdown code block (e.g., ```json{...}```)
-    // The 's' flag allows '.' to match newlines
+    let responseText = result.response.text().trim();
+    
+    // Remove markdown formatting if present
     const jsonMatch = responseText.match(/^```json\n(.*)\n```$/s);
-
     if (jsonMatch && jsonMatch[1]) {
-      // If the markdown wrapper is found, use the captured group (the actual JSON part)
       responseText = jsonMatch[1].trim();
-    } else {
-      // If no markdown wrapper, assume it might still have leading/trailing whitespace
-      // and attempt to trim it. Log a warning for debugging.
-      console.warn("Gemini response did not contain expected markdown JSON block. Attempting raw parse.");
-      responseText = responseText.trim();
     }
 
-    // Parse the cleaned string into a JSON object
     return JSON.parse(responseText);
-
   } catch (error) {
     console.error("Error analyzing question and parsing JSON:", error);
-    // Return a default analysis in case of error
-    return {
-      intent: 'general',
-      needsBankData: false,
-      needsCreditData: false,
-      needsEPFData: false,
-      needsMFData: false,
-      needsStockData: false,
-      needsNetWorth: false
-    };
+    throw error;
   }
 }
 
 /**
  * Generates an expense report based on bank transactions.
- * @param {object} params - Parameters including transactions, question, time period, merchant, and category.
- * @returns {Promise<string>} - A detailed expense report.
  */
 async function getExpense({ transactions, question, timePeriod, merchant, category }) {
-  //   let parsedData;
-  //   // console.log("HELLO2"+transactions) 
-  // try {
-  //   // console.log("HELLO"+transactions);
-  //   parsedData = JSON.parse(transactions);
-  // } catch (e) {
-  //   console.error("Failed to parse JSON:", e.message);
-  //   return;
-  // }
-  // console.log("HI");
-  // console.log(parsedData);
-  // const txns = transactions.bankTransactions?.[0]?.txns;
-  // // console.log(  "HI");
-  // // console.log(txns);
-  // const formatted = txns
-  // .slice(0, 100)
-  // .map(t => `${t[2]} | ₹${t[0]} | ${t[1]} | ${(t[3])}`)
-  // .join('\n');
-  // print(formatted);
-  // console.log(formatted);
   const prompt = `
-  Analyze these bank transactions transactionType (1 for CREDIT, 2 for DEBIT, 3 for OPENING, 4 for INTEREST, 5 for TDS, 6 for INSTALLMENT, 7 for CLOSING and 8 for OTHERS) to answer the user's question.
+  Analyze these bank transactions to answer the user's question.
   Question: "${question}"
 
   ${timePeriod ? `Time Period: ${timePeriod}` : ''}
   ${merchant ? `Merchant: ${merchant}` : ''}
   ${category ? `Category: ${category}` : ''}
 
-  
-
   Transactions (date, amount, merchant, category):
   ${transactions}
 
-  Provide a detailed response answering the question, including:
+  Provide a detailed response including:
   - Total amount spent
   - Breakdown by category if relevant
-  - Any interesting patterns or observations
-  - Suggestions for saving money if applicable
+  - Key patterns or observations
+  - Money-saving suggestions if applicable
 
-  Format the response in clear, human-readable text with appropriate headings.
+  Keep the response concise and actionable.
   `;
 
-  // console.log("HI")
-  try{
+  try {
     const result = await model.generateContent(prompt);
-    const responseText = result.response.text();
-    console.log(responseText);
-    return responseText;
-  }catch(e){
-     console.error("Failed to generate response", e.message);
+    return result.response.text();
+  } catch (error) {
+    console.error("Failed to generate expense response:", error);
+    throw error;
   }
-  return responseText;
 }
 
 /**
  * Generates a visualization description and data summary for transactions.
- * @param {object} params - Parameters including transactions, question, time period, and category.
- * @returns {Promise<string>} - A description of the chart, data points, insights, and recommendations.
  */
 async function getChart({ transactions, question, timePeriod, category }) {
   const prompt = `
-  Create a visualization description and data summary for these transactions based on the user's question.
+  Create a visualization description for these transactions.
   Question: "${question}"
 
   ${timePeriod ? `Time Period: ${timePeriod}` : ''}
   ${category ? `Category: ${category}` : ''}
 
-  Transactions (date, amount, merchant, category):
-  ${transactions}
+  Transactions: ${transactions}
 
   Provide:
-  1. A description of the best chart type to visualize this data (pie, bar, line, etc.)
-  2. The data points that should be plotted (formatted as labels and values)
-  3. Key insights from the data
-  4. Any recommendations based on the patterns
+  1. Best chart type (pie, bar, line)
+  2. Data points to plot
+  3. Key insights
+  4. Recommendations
 
-  Format the response with clear sections for each component.
+  Keep it concise and actionable.
   `;
 
   const result = await model.generateContent(prompt);
-  console.log(result.response.text())
   return result.response.text();
 }
 
 /**
  * Provides personalized investment advice.
- * @param {object} params - Parameters including question, net worth, credit score, EPF data, MF transactions, and stock transactions.
- * @returns {Promise<string>} - Personalized investment advice.
  */
-async function getInvestmentAdvice({ question, netWorth, mfTransactions, stockTransactions}){
-  // console.log("Hello");
-  // console.log(netWorth)
+async function getInvestmentAdvice({ question, netWorth, mfTransactions, stockTransactions }) {
   const prompt = `
-  Provide personalized investment advice based on the user's financial situation and question.
+  Provide investment advice based on the user's financial situation.
 
   Question: "${question}"
 
-  User's financial profile:
-  ${netWorth ? `- Net Worth: ₹${netWorth}` : ''}
+  Financial profile:
+  ${netWorth ? `- Net Worth: ${netWorth}` : ''}
   ${mfTransactions ? `- Mutual Fund Transactions: ${mfTransactions}` : ''}
-  ${stockTransactions ? `- Stock Transactions: ${stockTransactions} stocks` : ''}
+  ${stockTransactions ? `- Stock Transactions: ${stockTransactions}` : ''}
 
   Provide:
-  1. Assessment of current financial health
-  2. Recommended investment strategy based on the question
-  3. Specific asset allocation suggestions
-  4. Any risks or considerations
-  5. Actionable steps the user can take
+  1. Financial health assessment
+  2. Investment strategy recommendations
+  3. Asset allocation suggestions
+  4. Risk considerations
+  5. Actionable next steps
 
-  Format the response with clear sections and professional advice.
+  Keep the advice practical and specific.
   `;
-  console.log(prompt);
+
   const result = await model.generateContent(prompt);
-  console.log(result.response.text())
   return result.response.text();
 }
 
 /**
  * Analyzes a credit report to answer user questions.
- * @param {object} params - Parameters including credit report and question.
- * @returns {Promise<string>} - A credit analysis with answers, explanations, and suggestions.
  */
 async function getCreditAnalysis({ creditReport, question }) {
   const prompt = `
   Analyze this credit report to answer the user's question.
   Question: "${question}"
 
-  Credit Report Data:
-  ${creditReport}
+  Credit Report: ${creditReport}
 
   Provide:
-  1. A clear answer to the user's question based upon the given information
-  2. Explanation of any relevant credit factors
-  3. Suggestions for improvement if applicable
-  4. Any important warnings or considerations
-  5. Quote your suggestions or advises with proper data and stats
+  1. Clear answer to the question
+  2. Relevant credit factor explanations
+  3. Improvement suggestions
+  4. Important warnings or considerations
+  5. Data-backed recommendations
 
-  Format the response with clear sections and professional advice.
+  Keep the response professional and actionable.
   `;
 
   const result = await model.generateContent(prompt);
-  console.log(result.response.text());
+  return result.response.text();
+}
+
+/**
+ * Analyzes net worth and assets.
+ */
+async function getAssets({ netWorth, question }) {
+  const prompt = `
+  Analyze this net worth information to answer the user's question.
+  Question: "${question}"
+
+  Net Worth Data: ${netWorth}
+
+  Provide:
+  1. Clear answer based on the data
+  2. Asset allocation analysis
+  3. Recommendations for improvement
+  4. Risk assessment
+  5. Next steps
+
+  Keep the response practical and specific.
+  `;
+
+  const result = await model.generateContent(prompt);
   return result.response.text();
 }
 
 export { analyzeAndRespond as answer };
-
-// Removed console.log to prevent it from running during import
-// console.log(analyzeAndRespond("Can you give me the this month transactions visualized ?"));
-
