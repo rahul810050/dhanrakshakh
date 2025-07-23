@@ -64,7 +64,7 @@ async function analyzeAndRespond(userQuestion) {
     if (analysis.needsNetWorth) {
       data.netWorth = await getNetWorth();
     }
-
+    // console.log(data);
     // Route the request based on the detected intent
     switch (analysis.intent) {
       case 'expense':
@@ -110,14 +110,18 @@ async function analyzeAndRespond(userQuestion) {
         });
 
       case 'net_worth':
-        if (!data.creditReport) {
+        // console.log("HELLO")
+        if (!data.netWorth || !data.mfTransactions || !data.stockTransactions) {
+          // console.log("HELLO");
           return "I couldn't retrieve your necessary information to answer your question.";
         }
         return await getAssets({
-          netWortht: data.netWorth,
-          question: userQuestion
+          
+          question: userQuestion,
+          netWorth: data.netWorth,
+          mfTransactions:data.mfTransactions,
+          stockTransactions:data.stockTransactions,
         });
-
 
       default:
         // For general questions, directly use the model
@@ -351,7 +355,47 @@ async function getCreditAnalysis({ creditReport, question }) {
   return result.response.text();
 }
 
+async function getAssets({ question, netWorth, mfTransactions, stockTransactions }) {
+ const prompt = `
+You are a smart and analytical financial assistant helping users understand their personal net worth, investments, and asset portfolio. 
+
+You will be provided with structured financial data including:
+- 📊 Net Worth breakdown
+- 📈 Mutual Fund transactions
+- 📉 Stock transactions
+
+Your task is to:
+1. Accurately interpret the data.
+2. Answer the user's question clearly and concisely.
+3. Provide helpful insights or summaries where applicable (like asset allocation, trends, growth, etc.).
+
+You must base your response **only** on the data provided. If something is not available or unclear, say so politely and do not guess.
+
+---
+🔸 Net Worth Degtails:
+${netWorth}
+
+🔸 Mutual Fund Transactions:
+${mfTransactions}
+
+🔸 Stock Transactions:
+${stockTransactions}
+
+---
+
+Now answer the following user query using only the information provided above:
+"${question}"
+
+Be concise, accurate, and focus only on the relevant data. You can perform calculations or summaries based on the given data.
+`;
+  // console.log(prompt);
+  const result = await model.generateContent(prompt);
+  const response = result.response;
+  // console.log(response.text());
+  return response.text();
+}
+
 export { analyzeAndRespond as answer };
 
-console.log(analyzeAndRespond("Can you give me the this month transactions visualized ?"));
+console.log(analyzeAndRespond("What is my Networth ?"));
 
